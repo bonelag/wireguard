@@ -115,14 +115,17 @@ jobs:
           Write-Host "Version Array: $versionArray"
           Write-Host "Version String: $versionStr"
           
-          # Create defines with proper escaping
-          $nl = [Environment]::NewLine
-          $defines = "#define WIREGUARD_VERSION_ARRAY $versionArray$nl#define WIREGUARD_VERSION_STR `"$versionStr`"$nl$nl"
+          # Read original file and normalize line endings to LF
           $content = Get-Content resources.rc -Raw -Encoding UTF8
+          $content = $content -replace "`r`n", "`n"
+          
+          # Create defines with LF line endings
+          $defines = "#define WIREGUARD_VERSION_ARRAY $versionArray`n#define WIREGUARD_VERSION_STR `"$versionStr`"`n`n"
           $fullContent = $defines + $content
           
-          # Write to temp file
-          [System.IO.File]::WriteAllText("$pwd\resources_tmp.rc", $fullContent, [System.Text.Encoding]::UTF8)
+          # Write to temp file with UTF8 without BOM
+          $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+          [System.IO.File]::WriteAllText("$pwd\resources_tmp.rc", $fullContent, $utf8NoBom)
           
           Write-Host "=== First 30 lines of resources_tmp.rc ==="
           Get-Content resources_tmp.rc | Select-Object -First 30 | ForEach-Object { Write-Host $_ }
