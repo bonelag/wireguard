@@ -106,10 +106,13 @@ jobs:
 
           # Create a temporary resources file with numeric FILEVERSION (windres dislikes dotted tokens)
           $versionArray = '${{ steps.version.outputs.VERSION_ARRAY }}'
-          (Get-Content resources.rc -Raw) -replace 'WIREGUARD_VERSION_ARRAY', $versionArray | Set-Content resources_tmp.rc -Encoding utf8
+          $content = Get-Content resources.rc -Raw -Encoding UTF8
+          $content = $content -replace 'WIREGUARD_VERSION_ARRAY', $versionArray
+          $content = $content -replace 'WIREGUARD_VERSION_STR', '${{ steps.version.outputs.VERSION }}'
+          $content | Set-Content resources_tmp.rc -Encoding UTF8 -NoNewline
 
           # Run windres on the temporary file
-          x86_64-w64-mingw32-windres -I ".deps\\wireguard-nt\\bin\\amd64" -DWIREGUARD_VERSION_STR='${{ steps.version.outputs.VERSION }}' -i resources_tmp.rc -o "resources_amd64.syso" -O coff -c 65001
+          x86_64-w64-mingw32-windres -I ".deps\\wireguard-nt\\bin\\amd64" -i resources_tmp.rc -o "resources_amd64.syso" -O coff -c 65001
           Remove-Item resources_tmp.rc -ErrorAction SilentlyContinue
 
       - name: Build WireGuard.exe
