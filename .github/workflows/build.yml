@@ -95,8 +95,12 @@ jobs:
           echo "VERSION=$version" >> $env:GITHUB_OUTPUT
           echo "Building version: $version"
           
-          $versionArray = ($version -split '\.' + @('0', '0', '0', '0'))[0..3] -join ','
+          # Split version and pad with zeros, then join with commas
+          $parts = $version -split '\.'
+          while ($parts.Count -lt 4) { $parts += '0' }
+          $versionArray = $parts[0..3] -join ','
           echo "VERSION_ARRAY=$versionArray" >> $env:GITHUB_OUTPUT
+          echo "Version array: $versionArray"
 
       - name: Build resources
         shell: pwsh
@@ -108,14 +112,30 @@ jobs:
           $versionArray = '${{ steps.version.outputs.VERSION_ARRAY }}'
           $versionStr = '${{ steps.version.outputs.VERSION }}'
           
-          # Add version defines at the top of the file
-          $defines = "#define WIREGUARD_VERSION_ARRAY $versionArray`n#define WIREGUARD_VERSION_STR `"$versionStr`"`n`n"
+          Write-Host "Version Array: $versionArray"
+          Write-Host "Version String: $versionStr"
+          
+          # Create defines with proper escaping
+          $nl = [Environment]::NewLine
+          $defines = "#define WIREGUARD_VERSION_ARRAY $versionArray$nl#define WIREGUARD_VERSION_STR `"$versionStr`"$nl$nl"
           $content = Get-Content resources.rc -Raw -Encoding UTF8
-          $content = $defines + $content
-          $content | Set-Content resources_tmp.rc -Encoding UTF8 -NoNewline
+          $fullContent = $defines + $content
+          
+          # Write to temp file
+          [System.IO.File]::WriteAllText("$pwd\resources_tmp.rc", $fullContent, [System.Text.Encoding]::UTF8)
+          
+          Write-Host "=== First 30 lines of resources_tmp.rc ==="
+          Get-Content resources_tmp.rc | Select-Object -First 30 | ForEach-Object { Write-Host $_ }
+          Write-Host "==========================================="
 
           # Run windres on the temporary file
           x86_64-w64-mingw32-windres -I ".deps\\wireguard-nt\\bin\\amd64" -i resources_tmp.rc -o "resources_amd64.syso" -O coff -c 65001
+          
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "windres failed with exit code $LASTEXITCODE"
+            exit 1
+          }
+          
           Remove-Item resources_tmp.rc -ErrorAction SilentlyContinue
 
       - name: Build WireGuard.exe
