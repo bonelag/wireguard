@@ -104,11 +104,14 @@ jobs:
           # Ensure llvm-mingw tools are on PATH
           $env:PATH = "$pwd\.deps\\llvm-mingw\\bin;" + $env:PATH
 
-          # Create a temporary resources file with numeric FILEVERSION (windres dislikes dotted tokens)
+          # Create a temporary resources file with proper version defines
           $versionArray = '${{ steps.version.outputs.VERSION_ARRAY }}'
+          $versionStr = '${{ steps.version.outputs.VERSION }}'
+          
+          # Add version defines at the top of the file
+          $defines = "#define WIREGUARD_VERSION_ARRAY $versionArray`n#define WIREGUARD_VERSION_STR `"$versionStr`"`n`n"
           $content = Get-Content resources.rc -Raw -Encoding UTF8
-          $content = $content -replace 'WIREGUARD_VERSION_ARRAY', $versionArray
-          $content = $content -replace 'WIREGUARD_VERSION_STR', '${{ steps.version.outputs.VERSION }}'
+          $content = $defines + $content
           $content | Set-Content resources_tmp.rc -Encoding UTF8 -NoNewline
 
           # Run windres on the temporary file
