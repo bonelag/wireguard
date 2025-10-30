@@ -67,7 +67,7 @@ jobs:
           del make.zip
           
           echo [+] Downloading WireGuard Tools
-          curl -fsSL -o wireguard-tools.zip https://git.zx2c4.com/wireguard-tools/snapshot/wireguard-tools-1ee37b8e4833a25efe6f1fc0d5bdcb476148f4ba.zip
+          curl -fsSL -o wireguard-tools.zip https://git.zx2c4.com/wireguard-tools/snapshot/wireguard-tools-1.0.20250521.zip
           tar -xf wireguard-tools.zip --exclude wg-quick --strip-components 1
           del wireguard-tools.zip
           
@@ -164,7 +164,7 @@ jobs:
           
           echo [+] Building wg.exe for amd64
           set LDFLAGS=-s
-          make PLATFORM=windows CC=x86_64-w64-mingw32-gcc WINDRES=x86_64-w64-mingw32-windres V=1 RUNSTATEDIR= SYSTEMDUNITDIR= wg.exe
+          make PLATFORM=windows CC=x86_64-w64-mingw32-gcc WINDRES=x86_64-w64-mingw32-windres V=1 RUNSTATEDIR= SYSTEMDUNITDIR= wg
           
           move /Y wg.exe ..\..\amd64\wg.exe
 
