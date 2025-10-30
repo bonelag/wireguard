@@ -99,10 +99,18 @@ jobs:
           echo "VERSION_ARRAY=$versionArray" >> $env:GITHUB_OUTPUT
 
       - name: Build resources
-        shell: cmd
+        shell: pwsh
         run: |
-          set PATH=%CD%\.deps\llvm-mingw\bin;%PATH%
-          x86_64-w64-mingw32-windres -I ".deps\wireguard-nt\bin\amd64" -DWIREGUARD_VERSION_ARRAY=${{ steps.version.outputs.VERSION_ARRAY }} -DWIREGUARD_VERSION_STR=${{ steps.version.outputs.VERSION }} -i resources.rc -o "resources_amd64.syso" -O coff -c 65001
+          # Ensure llvm-mingw tools are on PATH
+          $env:PATH = "$pwd\.deps\\llvm-mingw\\bin;" + $env:PATH
+
+          # Create a temporary resources file with numeric FILEVERSION (windres dislikes dotted tokens)
+          $versionArray = '${{ steps.version.outputs.VERSION_ARRAY }}'
+          (Get-Content resources.rc -Raw) -replace 'WIREGUARD_VERSION_ARRAY', $versionArray | Set-Content resources_tmp.rc -Encoding utf8
+
+          # Run windres on the temporary file
+          x86_64-w64-mingw32-windres -I ".deps\\wireguard-nt\\bin\\amd64" -DWIREGUARD_VERSION_STR='${{ steps.version.outputs.VERSION }}' -i resources_tmp.rc -o "resources_amd64.syso" -O coff -c 65001
+          Remove-Item resources_tmp.rc -ErrorAction SilentlyContinue
 
       - name: Build WireGuard.exe
         shell: cmd
