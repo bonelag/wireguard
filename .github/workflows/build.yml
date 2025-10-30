@@ -120,7 +120,7 @@ jobs:
           $content = $content -replace "`r`n", "`n"
           
           # Create defines with LF line endings
-          $defines = "#define WIREGUARD_VERSION_ARRAY $versionArray`n#define WIREGUARD_VERSION_STR `"$versionStr`"`n`n"
+          $defines = "#define WIREGUARD_VERSION_ARRAY $versionArray`n#define WIREGUARD_VERSION_STR $versionStr`n`n"
           $fullContent = $defines + $content
           
           # Write to temp file with UTF8 without BOM
