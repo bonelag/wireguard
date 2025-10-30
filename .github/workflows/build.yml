@@ -1,0 +1,267 @@
+name: Build WireGuard Windows
+
+on:
+  push:
+    branches: [ master, main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+env:
+  GO_VERSION: '1.20.14'
+
+jobs:
+  build:
+    name: Build WireGuard.exe
+    runs-on: windows-latest
+    
+    strategy:
+      matrix:
+        arch: [amd64, x86, arm64]
+        include:
+          - arch: amd64
+            mingw: x86_64
+            goarch: amd64
+          - arch: x86
+            mingw: i686
+            goarch: 386
+          - arch: arm64
+            mingw: aarch64
+            goarch: arm64
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            .deps
+            ~\AppData\Local\go-build
+            ~\go\pkg\mod
+          key: ${{ runner.os }}-go-${{ matrix.arch }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-${{ matrix.arch }}-
+            ${{ runner.os }}-go-
+
+      - name: Install dependencies
+        shell: cmd
+        run: |
+          if not exist .deps mkdir .deps
+          cd .deps
+          
+          echo [+] Downloading Go
+          curl -fsSL -o go.zip https://go.dev/dl/go${{ env.GO_VERSION }}.windows-amd64.zip
+          tar -xf go.zip
+          del go.zip
+          
+          echo [+] Downloading LLVM-MinGW
+          curl -fsSL -o llvm-mingw.zip https://download.wireguard.com/windows-toolchain/distfiles/llvm-mingw-20201020-msvcrt-x86_64.zip
+          tar -xf llvm-mingw.zip
+          del llvm-mingw.zip
+          
+          echo [+] Downloading ImageMagick
+          curl -fsSL -o imagemagick.zip https://download.wireguard.com/windows-toolchain/distfiles/ImageMagick-7.0.8-42-portable-Q16-x64.zip
+          tar -xf imagemagick.zip convert.exe colors.xml delegates.xml
+          del imagemagick.zip
+          
+          echo [+] Downloading Make
+          curl -fsSL -o make.zip https://download.wireguard.com/windows-toolchain/distfiles/make-4.2.1-without-guile-w32-bin.zip
+          tar -xf make.zip --strip-components 1 bin
+          del make.zip
+          
+          echo [+] Downloading WireGuard Tools
+          curl -fsSL -o wireguard-tools.zip https://git.zx2c4.com/wireguard-tools/snapshot/wireguard-tools-1ee37b8e4833a25efe6f1fc0d5bdcb476148f4ba.zip
+          tar -xf wireguard-tools.zip --exclude wg-quick --strip-components 1
+          del wireguard-tools.zip
+          
+          echo [+] Downloading WireGuard NT
+          curl -fsSL -o wireguard-nt.zip https://download.wireguard.com/wireguard-nt/wireguard-nt-0.10.1.zip
+          tar -xf wireguard-nt.zip
+          del wireguard-nt.zip
+          
+          copy /y NUL prepared > NUL
+          cd ..
+
+      - name: Render icons
+        shell: cmd
+        run: |
+          set PATH=%CD%\.deps\bin;%CD%\.deps;%PATH%
+          for %%a in (ui\icon\*.svg) do (
+            convert -background none "%%a" -define icon:auto-resize="256,192,128,96,64,48,40,32,24,20,16" -compress zip "%%~dpna.ico"
+          )
+
+      - name: Get version
+        id: version
+        shell: pwsh
+        run: |
+          $version = Select-String -Path "version\version.go" -Pattern 'Number\s*=\s*"([0-9.]+)"' | ForEach-Object { $_.Matches.Groups[1].Value }
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+          echo "Building version: $version"
+          
+          $versionArray = ($version -split '\.' + @('0', '0', '0', '0'))[0..3] -join ','
+          echo "VERSION_ARRAY=$versionArray" >> $env:GITHUB_OUTPUT
+
+      - name: Build resources
+        shell: cmd
+        run: |
+          set PATH=%CD%\.deps\llvm-mingw\bin;%PATH%
+          ${{ matrix.mingw }}-w64-mingw32-windres -I ".deps\wireguard-nt\bin\${{ matrix.arch }}" -DWIREGUARD_VERSION_ARRAY=${{ steps.version.outputs.VERSION_ARRAY }} -DWIREGUARD_VERSION_STR=${{ steps.version.outputs.VERSION }} -i resources.rc -o "resources_${{ matrix.goarch }}.syso" -O coff -c 65001
+
+      - name: Build WireGuard.exe
+        shell: cmd
+        env:
+          GOOS: windows
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: '7'
+        run: |
+          set PATH=%CD%\.deps\go\bin;%PATH%
+          set GOOS=windows
+          set GOARCH=${{ matrix.goarch }}
+          set GOARM=7
+          
+          if not exist ${{ matrix.arch }} mkdir ${{ matrix.arch }}
+          
+          echo [+] Building WireGuard for ${{ matrix.arch }}
+          go build -tags load_wgnt_from_rsrc -ldflags="-H windowsgui -s -w" -trimpath -buildvcs=false -v -o "${{ matrix.arch }}\wireguard.exe"
+
+      - name: Build wg.exe command line tool
+        shell: cmd
+        run: |
+          set PATH=%CD%\.deps\llvm-mingw\bin;%CD%\.deps;%PATH%
+          cd .deps\src
+          
+          echo [+] Building wg.exe for ${{ matrix.arch }}
+          set LDFLAGS=-s
+          make PLATFORM=windows CC=${{ matrix.mingw }}-w64-mingw32-gcc WINDRES=${{ matrix.mingw }}-w64-mingw32-windres V=1 RUNSTATEDIR= SYSTEMDUNITDIR= wg.exe
+          
+          move /Y wg.exe ..\..\${{ matrix.arch }}\wg.exe
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wireguard-windows-${{ matrix.arch }}-${{ steps.version.outputs.VERSION }}
+          path: |
+            ${{ matrix.arch }}/wireguard.exe
+            ${{ matrix.arch }}/wg.exe
+          if-no-files-found: error
+          retention-days: 30
+
+  build-installer:
+    name: Build MSI Installer
+    needs: build
+    runs-on: windows-latest
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Copy executables to correct locations
+        shell: pwsh
+        run: |
+          Copy-Item -Path "artifacts/wireguard-windows-amd64-*/wireguard.exe" -Destination "amd64/" -Force
+          Copy-Item -Path "artifacts/wireguard-windows-amd64-*/wg.exe" -Destination "amd64/" -Force
+          Copy-Item -Path "artifacts/wireguard-windows-x86-*/wireguard.exe" -Destination "x86/" -Force
+          Copy-Item -Path "artifacts/wireguard-windows-x86-*/wg.exe" -Destination "x86/" -Force
+          Copy-Item -Path "artifacts/wireguard-windows-arm64-*/wireguard.exe" -Destination "arm64/" -Force
+          Copy-Item -Path "artifacts/wireguard-windows-arm64-*/wg.exe" -Destination "arm64/" -Force
+
+      - name: Get version
+        id: version
+        shell: pwsh
+        run: |
+          $version = Select-String -Path "version\version.go" -Pattern 'Number\s*=\s*"([0-9.]+)"' | ForEach-Object { $_.Matches.Groups[1].Value }
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Setup installer dependencies
+        shell: cmd
+        working-directory: installer
+        run: |
+          if not exist .deps mkdir .deps
+          cd .deps
+          
+          echo [+] Downloading WiX Toolset
+          curl -fsSL -o wix-binaries.zip https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip
+          
+          mkdir wix\bin
+          tar -xf wix-binaries.zip -C wix\bin
+          del wix-binaries.zip
+          
+          copy /y NUL prepared > NUL
+          cd ..\..
+
+      - name: Setup MinGW for custom actions
+        shell: cmd
+        run: |
+          cd installer
+          if not exist ..\.deps\llvm-mingw (
+            cd ..\.deps
+            curl -fsSL -o llvm-mingw.zip https://download.wireguard.com/windows-toolchain/distfiles/llvm-mingw-20201020-msvcrt-x86_64.zip
+            tar -xf llvm-mingw.zip
+            del llvm-mingw.zip
+            cd ..\installer
+          )
+
+      - name: Build MSI installers
+        shell: cmd
+        working-directory: installer
+        run: |
+          set PATH=%CD%\..\.deps\llvm-mingw\bin;%PATH%
+          set WIX=%CD%\.deps\wix\
+          set CFLAGS=-O3 -Wall -std=gnu11 -DWINVER=0x0601 -D_WIN32_WINNT=0x0601 -municode -DUNICODE -D_UNICODE -DNDEBUG
+          set LDFLAGS=-shared -s -Wl,--kill-at -Wl,--major-os-version=6 -Wl,--minor-os-version=1 -Wl,--major-subsystem-version=6 -Wl,--minor-subsystem-version=1 -Wl,--tsaware -Wl,--dynamicbase -Wl,--nxcompat -Wl,--export-all-symbols
+          set LDLIBS=-lmsi -lole32 -lshlwapi -lshell32 -luuid -lntdll
+          
+          call build.bat
+
+      - name: Upload MSI installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: wireguard-windows-installers-${{ steps.version.outputs.VERSION }}
+          path: installer/dist/*.msi
+          if-no-files-found: error
+          retention-days: 90
+
+  create-release:
+    name: Create Release
+    needs: [build, build-installer]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            artifacts/**/*.exe
+            artifacts/**/*.msi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
